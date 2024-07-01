@@ -1,13 +1,12 @@
 import events from 'events';
-
+import {IDatabase} from '../tstype';
 import {Adapter} from '../../adapter';
-import Database from '../database';
 
 abstract class Entity extends events.EventEmitter {
-    protected static database: Database = null;
+    protected static database: IDatabase = null;
     protected static adapter: Adapter = null;
 
-    public static injectDatabase(database: Database): void {
+    public static injectDatabase(database: IDatabase): void {
         Entity.database = database;
     }
 

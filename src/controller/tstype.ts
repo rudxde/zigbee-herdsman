@@ -31,14 +31,24 @@ interface DatabaseEntry {
     [s: string]: any;
 }
 
-enum GreenPowerEvents {
-    deviceJoined = 'deviceJoined',
-}
-
 interface GreenPowerDeviceJoinedPayload {
     sourceID: number;
     deviceID: number;
     networkAddress: number;
 }
 
-export {KeyValue, DatabaseEntry, EntityType, DeviceType, GreenPowerEvents, GreenPowerDeviceJoinedPayload, SendPolicy};
+
+interface IDatabase {
+    getEntries(type: EntityType[]): Promise<DatabaseEntry[]>;
+    insert(DatabaseEntry: DatabaseEntry): Promise<void>;
+    update(DatabaseEntry: DatabaseEntry, write: boolean): Promise<void>;
+    remove(id: number): Promise<void>;
+    has(id: number): Promise<boolean>;
+    newID(): Promise<number>;
+    write(): Promise<void>;
+}
+
+export {
+    KeyValue, DatabaseEntry, EntityType, DeviceType, GreenPowerDeviceJoinedPayload,
+    SendPolicy, IDatabase
+};

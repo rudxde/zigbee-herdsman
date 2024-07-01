@@ -1,11 +1,11 @@
-import fs from 'fs';
-
+import * as fs from 'fs';
+import {readFile} from 'fs/promises';
 import {logger} from '../utils/logger';
-import {DatabaseEntry, EntityType} from './tstype';
+import {DatabaseEntry, EntityType, IDatabase} from './tstype';
 
 const NS = 'zh:controller:database';
 
-class Database {
+class Database implements IDatabase {
     private entries: {[id: number]: DatabaseEntry};
     private path: string;
     private maxId: number;
@@ -16,15 +16,12 @@ class Database {
         this.path = path;
     }
 
-    public static open(path: string): Database {
+    public static async open(path: string): Promise<Database> {
         const entries: {[id: number]: DatabaseEntry} = {};
 
         if (fs.existsSync(path)) {
-            const rows = fs
-                .readFileSync(path, 'utf-8')
-                .split('\n')
-                .map((r) => r.trim())
-                .filter((r) => r != '');
+            const dbFile = await readFile(path, 'utf-8');
+            const rows = dbFile.split('\n').map((r) => r.trim()).filter((r) => r != '');
             for (const row of rows) {
                 const json = JSON.parse(row);
                 if (json.hasOwnProperty('id')) {
@@ -36,20 +33,20 @@ class Database {
         return new Database(entries, path);
     }
 
-    public getEntries(type: EntityType[]): DatabaseEntry[] {
+    public async getEntries(type: EntityType[]): Promise<DatabaseEntry[]> {
         return Object.values(this.entries).filter((e) => type.includes(e.type));
     }
 
-    public insert(DatabaseEntry: DatabaseEntry): void {
+    public async insert(DatabaseEntry: DatabaseEntry): Promise<void> {
         if (this.entries[DatabaseEntry.id]) {
             throw new Error(`DatabaseEntry with ID '${DatabaseEntry.id}' already exists`);
         }
 
         this.entries[DatabaseEntry.id] = DatabaseEntry;
-        this.write();
+        await this.write();
     }
 
-    public update(DatabaseEntry: DatabaseEntry, write: boolean): void {
+    public async update(DatabaseEntry: DatabaseEntry, write: boolean): Promise<void> {
         if (!this.entries[DatabaseEntry.id]) {
             throw new Error(`DatabaseEntry with ID '${DatabaseEntry.id}' does not exist`);
         }
@@ -57,29 +54,29 @@ class Database {
         this.entries[DatabaseEntry.id] = DatabaseEntry;
 
         if (write) {
-            this.write();
+            await this.write();
         }
     }
 
-    public remove(ID: number): void {
+    public async remove(ID: number): Promise<void> {
         if (!this.entries[ID]) {
             throw new Error(`DatabaseEntry with ID '${ID}' does not exist`);
         }
 
         delete this.entries[ID];
-        this.write();
+        await this.write();
     }
 
-    public has(ID: number): boolean {
+    public async has(ID: number): Promise<boolean> {
         return this.entries.hasOwnProperty(ID);
     }
 
-    public newID(): number {
+    public async newID(): Promise<number> {
         this.maxId += 1;
         return this.maxId;
     }
 
-    public write(): void {
+    public async write(): Promise<void> {
         logger.debug(`Writing database to '${this.path}'`, NS);
         const lines = [];
         for (const DatabaseEntry of Object.values(this.entries)) {

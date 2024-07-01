@@ -15,9 +15,10 @@ import {Wait} from '../src/utils';
 import * as Models from '../src/models';
 import * as Utils from '../src/utils';
 import Bonjour, {BrowserConfig, Service} from 'bonjour-service';
-import {setLogger} from '../src/utils/logger';
-import {BroadcastAddress} from '../src/zspec/enums';
-import ZclTransactionSequenceNumber from '../src/controller/helpers/zclTransactionSequenceNumber';
+import {setLogger} from "../src/utils/logger";
+import {BroadcastAddress} from "../src/zspec/enums";
+import ZclTransactionSequenceNumber from "../src/controller/helpers/zclTransactionSequenceNumber";
+import {EventEmitter} from 'events';
 const globalSetImmediate = setImmediate;
 const flushPromises = () => new Promise(globalSetImmediate);
 
@@ -4495,7 +4496,7 @@ describe('Controller', () => {
         expect(Group.byGroupID(11)).toBeUndefined();
         const device = controller.getDeviceByIeeeAddr('0x129');
         const endpoint = device.getEndpoint(1);
-        endpoint.addBinding('genBasic', 11);
+        await endpoint.addBinding('genBasic', 11);
         const group = Group.byGroupID(11);
         expect(deepClone(endpoint.binds)).toStrictEqual(deepClone([{cluster: Zcl.Utils.getCluster(0), target: group}]));
     });
@@ -6866,17 +6867,17 @@ describe('Controller', () => {
     it('Should throw datbase basic crud errors', async () => {
         await controller.start();
         await mockAdapterEvents['deviceJoined']({networkAddress: 129, ieeeAddr: '0x129'});
-        expect(() => {
-            controller.database.insert({id: 2});
-        }).toThrowError(`DatabaseEntry with ID '2' already exists`);
+        expect(async () => {
+            await controller.database.insert({id: 2})
+        }).rejects.toThrow(`DatabaseEntry with ID '2' already exists`);
 
-        expect(() => {
-            controller.database.remove(3);
-        }).toThrowError(`DatabaseEntry with ID '3' does not exist`);
+        expect(async () => {
+            await controller.database.remove(3)
+        }).rejects.toThrow(`DatabaseEntry with ID '3' does not exist`);
 
-        expect(() => {
-            controller.database.update({id: 3});
-        }).toThrowError(`DatabaseEntry with ID '3' does not exist`);
+        expect(async () => {
+            await controller.database.update({id: 3})
+        }).rejects.toThrow(`DatabaseEntry with ID '3' does not exist`);
     });
 
     it('Should save received attributes', async () => {
@@ -7659,7 +7660,7 @@ describe('Controller', () => {
             linkquality: 50,
             groupID: 1,
         });
-
+        await flushPromises();
         expect(events.deviceJoined.length).toBe(1);
         expect(deepClone(events.deviceJoined[0])).toStrictEqual({
             device: {
@@ -7925,6 +7926,7 @@ describe('Controller', () => {
         };
         const frame = mockZclFrame.create(1, 0, true, null, 10, 'commissioningNotification', 33, data);
         jest.spyOn(Zcl.Frame, 'fromBuffer').mockReturnValueOnce(frame); // Mock because no Buffalo write for 0xe0 is implemented
+        const onDeviceJoinedGreenPower = jest.spyOn(controller, 'onDeviceJoinedGreenPower');
         await mockAdapterEvents['zclPayload']({
             wasBroadcast: true,
             address: 0x46f4fe,
@@ -7935,8 +7937,9 @@ describe('Controller', () => {
             linkquality: 50,
             groupID: 1,
         });
-
+        await flushPromises();
         const device = controller.getDeviceByIeeeAddr('0x000000000046f4fe');
+        expect(device).toBeDefined();
         const networkParameters = await controller.getNetworkParameters();
 
         const commissioningReply = {

@@ -468,10 +468,10 @@ class Endpoint extends Entity {
         );
     }
 
-    public addBinding(clusterKey: number | string, target: Endpoint | Group | number): void {
+    public async addBinding(clusterKey: number | string, target: Endpoint | Group | number): Promise<void> {
         const cluster = this.getCluster(clusterKey);
         if (typeof target === 'number') {
-            target = Group.byGroupID(target) || Group.create(target);
+            target = Group.byGroupID(target) || await Group.create(target);
         }
 
         if (!this.binds.find((b) => b.cluster.ID === cluster.ID && b.target === target)) {
@@ -486,7 +486,7 @@ class Endpoint extends Entity {
                 });
             }
 
-            this.save();
+            await this.save();
         }
     }
 
@@ -494,7 +494,7 @@ class Endpoint extends Entity {
         const cluster = this.getCluster(clusterKey);
         const type = target instanceof Endpoint ? 'endpoint' : 'group';
         if (typeof target === 'number') {
-            target = Group.byGroupID(target) || Group.create(target);
+            target = Group.byGroupID(target) || await Group.create(target);
         }
 
         const destinationAddress = target instanceof Endpoint ? target.deviceIeeeAddress : target.groupID;
@@ -515,7 +515,7 @@ class Endpoint extends Entity {
                 target instanceof Endpoint ? target.ID : null,
             );
 
-            this.addBinding(clusterKey, target);
+            await this.addBinding(clusterKey, target);
         } catch (error) {
             error.message = `${log} failed (${error.message})`;
             logger.debug(error, NS);
@@ -523,8 +523,8 @@ class Endpoint extends Entity {
         }
     }
 
-    public save(): void {
-        this.getDevice().save();
+    public async save(): Promise<void> {
+        await this.getDevice().save();
     }
 
     public async unbind(clusterKey: number | string, target: Endpoint | Group | number): Promise<void> {
@@ -556,7 +556,7 @@ class Endpoint extends Entity {
             const index = this.binds.findIndex((b) => b.cluster.ID === cluster.ID && b.target === target);
             if (index !== -1) {
                 this._binds.splice(index, 1);
-                this.save();
+                await this.save();
             }
         } catch (error) {
             error.message = `${log} failed (${error.message})`;
@@ -633,7 +633,7 @@ class Endpoint extends Entity {
             }
         }
 
-        this.save();
+        await this.save();
     }
 
     public async writeStructured(clusterKey: number | string, payload: KeyValue, options?: Options): Promise<void> {
@@ -795,7 +795,7 @@ class Endpoint extends Entity {
 
     public async addToGroup(group: Group): Promise<void> {
         await this.command('genGroups', 'add', {groupid: group.groupID, groupname: ''});
-        group.addMember(this);
+        await group.addMember(this);
     }
 
     private getCluster(clusterKey: number | string, device: Device | undefined = undefined): ZclTypes.Cluster {
@@ -811,19 +811,19 @@ class Endpoint extends Entity {
     public async removeFromGroup(group: Group | number): Promise<void> {
         await this.command('genGroups', 'remove', {groupid: group instanceof Group ? group.groupID : group});
         if (group instanceof Group) {
-            group.removeMember(this);
+            await group.removeMember(this);
         }
     }
 
     public async removeFromAllGroups(): Promise<void> {
         await this.command('genGroups', 'removeAll', {}, {disableDefaultResponse: true});
-        this.removeFromAllGroupsDatabase();
+        await this.removeFromAllGroupsDatabase();
     }
 
-    public removeFromAllGroupsDatabase(): void {
+    public async removeFromAllGroupsDatabase(): Promise<void> {
         for (const group of Group.all()) {
             if (group.hasMember(this)) {
-                group.removeMember(this);
+                await group.removeMember(this);
             }
         }
     }

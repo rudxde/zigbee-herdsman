@@ -316,23 +316,23 @@ class Device extends Entity {
         this._pendingRequestTimeout = pendingRequestTimeout;
     }
 
-    public createEndpoint(ID: number): Endpoint {
+    public async createEndpoint(ID: number): Promise<Endpoint> {
         if (this.getEndpoint(ID)) {
             throw new Error(`Device '${this.ieeeAddr}' already has an endpoint '${ID}'`);
         }
 
         const endpoint = Endpoint.create(ID, undefined, undefined, [], [], this.networkAddress, this.ieeeAddr);
         this.endpoints.push(endpoint);
-        this.save();
+        await this.save();
         return endpoint;
     }
 
-    public changeIeeeAddress(ieeeAddr: string): void {
+    public async changeIeeeAddress(ieeeAddr: string): Promise<void> {
         delete Device.devices[this.ieeeAddr];
         this.ieeeAddr = ieeeAddr;
         Device.devices[this.ieeeAddr] = this;
-        this.endpoints.forEach((e) => (e.deviceIeeeAddress = ieeeAddr));
-        this.save();
+        this.endpoints.forEach((e) => e.deviceIeeeAddress = ieeeAddr);
+        await this.save();
     }
 
     public getEndpoint(ID: number): Endpoint {
@@ -577,14 +577,15 @@ class Device extends Entity {
         };
     }
 
-    public save(writeDatabase = true): void {
-        Entity.database.update(this.toDatabaseEntry(), writeDatabase);
+    public async save(writeDatabase=true): Promise<void> {
+        await Entity.database.update(this.toDatabaseEntry(), writeDatabase);
     }
 
-    private static loadFromDatabaseIfNecessary(): void {
+    public static async loadDevices(): Promise<void> {
         if (!Device.devices) {
+            logger.debug('Loading devices', NS);
             Device.devices = {};
-            const entries = Entity.database.getEntries(['Coordinator', 'EndDevice', 'Router', 'GreenPower', 'Unknown']);
+            const entries = await Entity.database.getEntries(['Coordinator', 'EndDevice', 'Router', 'GreenPower', 'Unknown']);
             for (const entry of entries) {
                 const device = Device.fromDatabaseEntry(entry);
                 Device.devices[device.ieeeAddr] = device;
@@ -599,33 +600,30 @@ class Device extends Entity {
     }
 
     public static byIeeeAddr(ieeeAddr: string, includeDeleted: boolean = false): Device {
-        Device.loadFromDatabaseIfNecessary();
         const device = Device.devices[ieeeAddr];
         return device?._deleted && !includeDeleted ? undefined : device;
     }
 
     public static byNetworkAddress(networkAddress: number, includeDeleted: boolean = false): Device {
-        Device.loadFromDatabaseIfNecessary();
         return Object.values(Device.devices).find((d) => (includeDeleted || !d._deleted) && d.networkAddress === networkAddress);
     }
 
     public static byType(type: DeviceType): Device[] {
-        return Device.all().filter((d) => d.type === type);
+        return Object.values(Device.devices).filter((d) => !d._deleted && d.type === type);
     }
 
     public static all(): Device[] {
-        Device.loadFromDatabaseIfNecessary();
         return Object.values(Device.devices).filter((d) => !d._deleted);
     }
 
-    public undelete(interviewCompleted?: boolean): void {
+    public async undelete(interviewCompleted?: boolean): Promise<void> {
         assert(this._deleted, `Device '${this.ieeeAddr}' is not deleted`);
         this._deleted = false;
         this._interviewCompleted = interviewCompleted ?? this._interviewCompleted;
-        Entity.database.insert(this.toDatabaseEntry());
+        await Entity.database.insert(this.toDatabaseEntry());
     }
 
-    public static create(
+    public static async create (
         type: DeviceType,
         ieeeAddr: string,
         networkAddress: number,
@@ -641,8 +639,7 @@ class Device extends Entity {
             inputClusters: number[];
             outputClusters: number[];
         }[],
-    ): Device {
-        Device.loadFromDatabaseIfNecessary();
+    ): Promise<Device> {
         if (Device.devices[ieeeAddr] && !Device.devices[ieeeAddr]._deleted) {
             throw new Error(`Device with ieeeAddr '${ieeeAddr}' already exists`);
         }
@@ -651,7 +648,7 @@ class Device extends Entity {
             return Endpoint.create(e.ID, e.profileID, e.deviceID, e.inputClusters, e.outputClusters, networkAddress, ieeeAddr);
         });
 
-        const ID = Entity.database.newID();
+        const ID = await Entity.database.newID();
         const device = new Device(
             ID,
             type,
@@ -675,7 +672,7 @@ class Device extends Entity {
             0,
         );
 
-        Entity.database.insert(device.toDatabaseEntry());
+        await Entity.database.insert(device.toDatabaseEntry());
         Device.devices[device.ieeeAddr] = device;
         return device;
     }
@@ -708,7 +705,7 @@ class Device extends Entity {
             }
         } finally {
             this._interviewing = false;
-            this.save();
+            await this.save();
         }
 
         if (error) {
@@ -991,18 +988,17 @@ class Device extends Entity {
 
             await Entity.adapter.sendZclFrameToAll(242, frame, 242, BroadcastAddress.RX_ON_WHEN_IDLE);
         } else await Entity.adapter.removeDevice(this.networkAddress, this.ieeeAddr);
-        this.removeFromDatabase();
+        await this.removeFromDatabase();
     }
 
-    public removeFromDatabase(): void {
-        Device.loadFromDatabaseIfNecessary();
+    public async removeFromDatabase(): Promise<void> {
 
         for (const endpoint of this.endpoints) {
-            endpoint.removeFromAllGroupsDatabase();
+            await endpoint.removeFromAllGroupsDatabase();
         }
 
-        if (Entity.database.has(this.ID)) {
-            Entity.database.remove(this.ID);
+        if (await Entity.database.has(this.ID)) {
+            await Entity.database.remove(this.ID);
         }
 
         this._deleted = true;

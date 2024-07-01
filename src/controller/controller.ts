@@ -12,7 +12,7 @@ import GreenPower from './greenPower';
 import {ZclFrameConverter} from './helpers';
 import {Entity, Device} from './model';
 import Touchlink from './touchlink';
-import {KeyValue, DeviceType, GreenPowerEvents, GreenPowerDeviceJoinedPayload} from './tstype';
+import {KeyValue, DeviceType, IDatabase, GreenPowerDeviceJoinedPayload} from './tstype';
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
@@ -30,6 +30,7 @@ interface Options {
     databaseBackupPath: string;
     backupPath: string;
     adapter: AdapterTsType.AdapterOptions;
+    customDatabase?: IDatabase;
     /**
      * This lambda can be used by an application to explictly reject or accept an incoming device.
      * When false is returned zigbee-herdsman will not start the interview process and immidiately
@@ -67,7 +68,7 @@ const DefaultOptions: Options = {
  */
 class Controller extends events.EventEmitter {
     private options: Options;
-    private database: Database;
+    private database: IDatabase;
     private adapter: Adapter;
     private greenPower: GreenPower;
     private permitJoinNetworkClosedTimer: NodeJS.Timeout | null;
@@ -116,8 +117,16 @@ class Controller extends events.EventEmitter {
      */
     public async start(): Promise<AdapterTsType.StartResult> {
         // Database (create end inject)
-        this.database = Database.open(this.options.databasePath);
+        if(this.options.customDatabase) {
+            this.database = this.options.customDatabase;
+        } else {
+            this.database = await Database.open(this.options.databasePath);
+        }
         Entity.injectDatabase(this.database);
+        await Promise.all([
+            Device.loadDevices(),
+            Group.loadGroups(),
+        ]);
 
         // Adapter (create and inject)
         this.adapter = await Adapter.create(this.options.network, this.options.serialPort, this.options.backupPath, this.options.adapter);
@@ -144,8 +153,7 @@ class Controller extends events.EventEmitter {
         // log injection
         logger.debug(`Injected database: ${this.database != null}, adapter: ${this.adapter != null}`, NS);
 
-        this.greenPower = new GreenPower(this.adapter);
-        this.greenPower.on(GreenPowerEvents.deviceJoined, this.onDeviceJoinedGreenPower.bind(this));
+        this.greenPower = new GreenPower(this.adapter, this);
 
         // Register adapter events
         this.adapter.on(AdapterEvents.Events.deviceJoined, this.onDeviceJoined.bind(this));
@@ -162,11 +170,11 @@ class Controller extends events.EventEmitter {
 
             logger.debug('Clearing database...', NS);
             for (const group of Group.all()) {
-                group.removeFromDatabase();
+                await group.removeFromDatabase();
             }
 
             for (const device of Device.all()) {
-                device.removeFromDatabase();
+                await device.removeFromDatabase();
             }
         }
 
@@ -178,7 +186,7 @@ class Controller extends events.EventEmitter {
         const coordinator = await this.adapter.getCoordinator();
         if (Device.byType('Coordinator').length === 0) {
             logger.debug('No coordinator in database, querying...', NS);
-            Device.create(
+            await Device.create(
                 'Coordinator',
                 coordinator.ieeeAddr,
                 coordinator.networkAddress,
@@ -195,7 +203,7 @@ class Controller extends events.EventEmitter {
         const databaseCoordinator = Device.byType('Coordinator')[0];
         if (databaseCoordinator.ieeeAddr !== coordinator.ieeeAddr) {
             logger.info(`Coordinator address changed, updating to '${coordinator.ieeeAddr}'`, NS);
-            databaseCoordinator.changeIeeeAddress(coordinator.ieeeAddr);
+            await databaseCoordinator.changeIeeeAddress(coordinator.ieeeAddr);
         }
 
         // Set backup timer to 1 day.
@@ -323,7 +331,7 @@ class Controller extends events.EventEmitter {
         clearInterval(this.databaseSaveTimer);
 
         if (this.adapterDisconnected) {
-            this.databaseSave();
+            await this.databaseSave();
         } else {
             await catcho(() => this.permitJoinInternal(false, 'manual'), 'Failed to disable join on stop');
             await this.backup(); // always calls databaseSave()
@@ -333,20 +341,20 @@ class Controller extends events.EventEmitter {
         }
     }
 
-    private databaseSave(): void {
+    private async databaseSave(): Promise<void> {
         for (const device of Device.all()) {
-            device.save(false);
+            await device.save(false);
         }
 
         for (const group of Group.all()) {
-            group.save(false);
+            await group.save(false);
         }
 
-        this.database.write();
+        await this.database.write();
     }
 
     public async backup(): Promise<void> {
-        this.databaseSave();
+        await this.databaseSave();
         if (this.options.backupPath && (await this.adapter.supportsBackup())) {
             logger.debug('Creating coordinator backup', NS);
             const backup = await this.adapter.backup(Device.all().map((d) => d.ieeeAddr));
@@ -431,7 +439,7 @@ class Controller extends events.EventEmitter {
     /**
      * Create a Group
      */
-    public createGroup(groupID: number): Group {
+    public createGroup(groupID: number): Promise<Group> {
         return Group.create(groupID);
     }
 
@@ -452,7 +460,7 @@ class Controller extends events.EventEmitter {
         return this.adapter.setTransmitPower(value);
     }
 
-    private onNetworkAddress(payload: AdapterEvents.NetworkAddressPayload): void {
+    private async onNetworkAddress(payload: AdapterEvents.NetworkAddressPayload): Promise<void> {
         logger.debug(`Network address '${payload.ieeeAddr}'`, NS);
         const device = Device.byIeeeAddr(payload.ieeeAddr);
 
@@ -467,14 +475,14 @@ class Controller extends events.EventEmitter {
         if (device.networkAddress !== payload.networkAddress) {
             logger.debug(`Device '${payload.ieeeAddr}' got new networkAddress '${payload.networkAddress}'`, NS);
             device.networkAddress = payload.networkAddress;
-            device.save();
+            await device.save();
 
             const data: Events.DeviceNetworkAddressChangedPayload = {device};
             this.selfAndDeviceEmit(device, Events.Events.deviceNetworkAddressChanged, data);
         }
     }
 
-    private onDeviceAnnounce(payload: AdapterEvents.DeviceAnnouncePayload): void {
+    private async onDeviceAnnounce(payload: AdapterEvents.DeviceAnnouncePayload): Promise<void> {
         logger.debug(`Device announce '${payload.ieeeAddr}'`, NS);
         const device = Device.byIeeeAddr(payload.ieeeAddr);
 
@@ -490,14 +498,14 @@ class Controller extends events.EventEmitter {
         if (device.networkAddress !== payload.networkAddress) {
             logger.debug(`Device '${payload.ieeeAddr}' announced with new networkAddress '${payload.networkAddress}'`, NS);
             device.networkAddress = payload.networkAddress;
-            device.save();
+            await device.save();
         }
 
         const data: Events.DeviceAnnouncePayload = {device};
         this.selfAndDeviceEmit(device, Events.Events.deviceAnnounce, data);
     }
 
-    private onDeviceLeave(payload: AdapterEvents.DeviceLeavePayload): void {
+    private async onDeviceLeave(payload: AdapterEvents.DeviceLeavePayload): Promise<void> {
         logger.debug(`Device leave '${payload.ieeeAddr}'`, NS);
 
         const device = payload.ieeeAddr ? Device.byIeeeAddr(payload.ieeeAddr) : Device.byNetworkAddress(payload.networkAddress);
@@ -507,7 +515,7 @@ class Controller extends events.EventEmitter {
         }
 
         logger.debug(`Removing device from database '${device.ieeeAddr}'`, NS);
-        device.removeFromDatabase();
+        await device.removeFromDatabase();
 
         const data: Events.DeviceLeavePayload = {ieeeAddr: device.ieeeAddr};
         this.selfAndDeviceEmit(device, Events.Events.deviceLeave, data);
@@ -523,7 +531,7 @@ class Controller extends events.EventEmitter {
         this.emit(Events.Events.adapterDisconnected);
     }
 
-    private async onDeviceJoinedGreenPower(payload: GreenPowerDeviceJoinedPayload): Promise<void> {
+    async onDeviceJoinedGreenPower(payload: GreenPowerDeviceJoinedPayload): Promise<void> {
         logger.debug(`Green power device '${JSON.stringify(payload)}' joined`, NS);
 
         // Green power devices don't have an ieeeAddr, the sourceID is unique and static so use this.
@@ -537,8 +545,8 @@ class Controller extends events.EventEmitter {
         if (!device) {
             logger.debug(`New green power device '${ieeeAddr}' joined`, NS);
             logger.debug(`Creating device '${ieeeAddr}'`, NS);
-            device = Device.create('GreenPower', ieeeAddr, payload.networkAddress, null, undefined, undefined, modelID, true, []);
-            device.save();
+            device = await Device.create('GreenPower', ieeeAddr, payload.networkAddress, null, undefined, undefined, modelID, true, []);
+            await device.save();
 
             this.selfAndDeviceEmit(device, Events.Events.deviceJoined, {device} as Events.DeviceJoinedPayload);
 
@@ -547,7 +555,7 @@ class Controller extends events.EventEmitter {
         } else if (device.isDeleted) {
             logger.debug(`Deleted green power device '${ieeeAddr}' joined, undeleting`, NS);
 
-            device.undelete(true);
+            await device.undelete(true);
 
             this.selfAndDeviceEmit(device, Events.Events.deviceJoined, {device} as Events.DeviceJoinedPayload);
 
@@ -578,18 +586,18 @@ class Controller extends events.EventEmitter {
         if (!device) {
             logger.debug(`New device '${payload.ieeeAddr}' joined`, NS);
             logger.debug(`Creating device '${payload.ieeeAddr}'`, NS);
-            device = Device.create('Unknown', payload.ieeeAddr, payload.networkAddress, undefined, undefined, undefined, undefined, false, []);
+            device = await Device.create('Unknown', payload.ieeeAddr, payload.networkAddress, undefined, undefined, undefined, undefined, false, []);
             this.selfAndDeviceEmit(device, Events.Events.deviceJoined, {device} as Events.DeviceJoinedPayload);
         } else if (device.isDeleted) {
             logger.debug(`Deleted device '${payload.ieeeAddr}' joined, undeleting`, NS);
-            device.undelete();
+            await device.undelete();
             this.selfAndDeviceEmit(device, Events.Events.deviceJoined, {device} as Events.DeviceJoinedPayload);
         }
 
         if (device.networkAddress !== payload.networkAddress) {
             logger.debug(`Device '${payload.ieeeAddr}' is already in database with different network address, updating network address`, NS);
             device.networkAddress = payload.networkAddress;
-            device.save();
+            await device.save();
         }
 
         device.updateLastSeen();
@@ -687,7 +695,7 @@ class Controller extends events.EventEmitter {
                 `Data is from unknown endpoint '${payload.endpoint}' from device with ` + `network address '${payload.address}', creating it...`,
                 NS,
             );
-            endpoint = device.createEndpoint(payload.endpoint);
+            endpoint = await device.createEndpoint(payload.endpoint);
         }
 
         // Parse command for event

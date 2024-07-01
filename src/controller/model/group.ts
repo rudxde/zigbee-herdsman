@@ -65,10 +65,11 @@ class Group extends Entity {
         return {id: this.databaseID, type: 'Group', groupID: this.groupID, members, meta: this.meta};
     }
 
-    private static loadFromDatabaseIfNecessary(): void {
+    public static async loadGroups(): Promise<void> {
         if (!Group.groups) {
+            logger.debug('Loading groups', NS);
             Group.groups = {};
-            const entries = Entity.database.getEntries(['Group']);
+            const entries = await Entity.database.getEntries(['Group']);
             for (const entry of entries) {
                 const group = Group.fromDatabaseEntry(entry);
                 Group.groups[group.groupID] = group;
@@ -77,28 +78,25 @@ class Group extends Entity {
     }
 
     public static byGroupID(groupID: number): Group {
-        Group.loadFromDatabaseIfNecessary();
         return Group.groups[groupID];
     }
 
     public static all(): Group[] {
-        Group.loadFromDatabaseIfNecessary();
         return Object.values(Group.groups);
     }
 
-    public static create(groupID: number): Group {
+    public static async create(groupID: number): Promise<Group> {
         assert(typeof groupID === 'number', 'GroupID must be a number');
         // Don't allow groupID 0, from the spec:
         // "Scene identifier 0x00, along with group identifier 0x0000, is reserved for the global scene used by the OnOff cluster"
         assert(groupID >= 1, 'GroupID must be at least 1');
-        Group.loadFromDatabaseIfNecessary();
         if (Group.groups[groupID]) {
             throw new Error(`Group with groupID '${groupID}' already exists`);
         }
 
-        const databaseID = Entity.database.newID();
+        const databaseID = await Entity.database.newID();
         const group = new Group(databaseID, groupID, new Set(), {});
-        Entity.database.insert(group.toDatabaseRecord());
+        await Entity.database.insert(group.toDatabaseRecord());
 
         Group.groups[group.groupID] = group;
         return group;
@@ -109,31 +107,30 @@ class Group extends Entity {
             await endpoint.removeFromGroup(this);
         }
 
-        this.removeFromDatabase();
+        await this.removeFromDatabase();
     }
 
-    public removeFromDatabase(): void {
-        Group.loadFromDatabaseIfNecessary();
+    public async removeFromDatabase(): Promise<void> {
 
-        if (Entity.database.has(this.databaseID)) {
-            Entity.database.remove(this.databaseID);
+        if (await Entity.database.has(this.databaseID)) {
+            await Entity.database.remove(this.databaseID);
         }
 
         delete Group.groups[this.groupID];
     }
 
-    public save(writeDatabase = true): void {
-        Entity.database.update(this.toDatabaseRecord(), writeDatabase);
+    public async save(writeDatabase=true): Promise<void> {
+        await Entity.database.update(this.toDatabaseRecord(), writeDatabase);
     }
 
-    public addMember(endpoint: Endpoint): void {
+    public async addMember(endpoint: Endpoint): Promise<void> {
         this._members.add(endpoint);
-        this.save();
+        await this.save();
     }
 
-    public removeMember(endpoint: Endpoint): void {
+    public async removeMember(endpoint: Endpoint): Promise<void> {
         this._members.delete(endpoint);
-        this.save();
+        await this.save();
     }
 
     public hasMember(endpoint: Endpoint): boolean {

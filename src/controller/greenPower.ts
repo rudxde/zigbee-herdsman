@@ -1,24 +1,21 @@
 import crypto from 'crypto';
-import events from 'events';
-
 import {Adapter, Events as AdapterEvents} from '../adapter';
 import {logger} from '../utils/logger';
 import {BroadcastAddress} from '../zspec/enums';
 import * as Zcl from '../zspec/zcl';
 import ZclTransactionSequenceNumber from './helpers/zclTransactionSequenceNumber';
-import {GreenPowerEvents, GreenPowerDeviceJoinedPayload} from './tstype';
+import type Controller from './controller';
 
 const NS = 'zh:controller:greenpower';
 
 const zigBeeLinkKey = Buffer.from([0x5a, 0x69, 0x67, 0x42, 0x65, 0x65, 0x41, 0x6c, 0x6c, 0x69, 0x61, 0x6e, 0x63, 0x65, 0x30, 0x39]);
 
-class GreenPower extends events.EventEmitter {
-    private adapter: Adapter;
+class GreenPower {
 
-    public constructor(adapter: Adapter) {
-        super();
-        this.adapter = adapter;
-    }
+    public constructor(
+        private readonly adapter: Adapter,
+        private readonly controller: Controller,
+    ) { }
 
     private encryptSecurityKey(sourceID: number, securityKey: Buffer): Buffer {
         const sourceIDInBytes = Buffer.from([
@@ -170,12 +167,11 @@ class GreenPower extends events.EventEmitter {
                         await this.sendPairingCommand(payload, dataPayload, frame);
                     }
 
-                    const eventData: GreenPowerDeviceJoinedPayload = {
+                    await this.controller.onDeviceJoinedGreenPower({
                         sourceID: frame.payload.srcID,
                         deviceID: frame.payload.commandFrame.deviceID,
                         networkAddress: frame.payload.srcID & 0xffff,
-                    };
-                    this.emit(GreenPowerEvents.deviceJoined, eventData);
+                    });
 
                     break;
                 /* istanbul ignore next */
