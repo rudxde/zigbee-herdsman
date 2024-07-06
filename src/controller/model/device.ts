@@ -546,7 +546,7 @@ class Device extends Entity {
         );
     }
 
-    private toDatabaseEntry(): DatabaseEntry {
+    public toDatabaseEntry(): DatabaseEntry {
         const epList = this.endpoints.map((e): number => e.ID);
         const endpoints: KeyValue = {};
         for (const endpoint of this.endpoints) {
@@ -577,20 +577,21 @@ class Device extends Entity {
         };
     }
 
-    public async save(writeDatabase=true): Promise<void> {
-        await Entity.database.update(this.toDatabaseEntry(), writeDatabase);
+    public async save(): Promise<void> {
+        await Entity.database.update(this.toDatabaseEntry());
     }
 
     public static async loadDevices(): Promise<void> {
-        if (!Device.devices) {
-            logger.debug('Loading devices', NS);
-            Device.devices = {};
-            const entries = await Entity.database.getEntries(['Coordinator', 'EndDevice', 'Router', 'GreenPower', 'Unknown']);
-            for (const entry of entries) {
-                const device = Device.fromDatabaseEntry(entry);
-                Device.devices[device.ieeeAddr] = device;
-            }
+        logger.debug('Loading devices', NS);
+        Device.devices = {};
+        const entries = await Entity.database.getEntries(['Coordinator', 'EndDevice', 'Router', 'GreenPower', 'Unknown']);
+        for (const entry of entries) {
+            const device = Device.fromDatabaseEntry(entry);
+            Device.devices[device.ieeeAddr] = device;
         }
+        Entity.database.subscribeDeviceUpdates(async (device: DatabaseEntry): Promise<void> => {
+            Device.replaceDeviceFromDatabase(device);
+        });
     }
 
     public static find(ieeeOrNwkAddress: string | number, includeDeleted: boolean = false): Device {
@@ -675,6 +676,13 @@ class Device extends Entity {
         await Entity.database.insert(device.toDatabaseEntry());
         Device.devices[device.ieeeAddr] = device;
         return device;
+    }
+
+    private static replaceDeviceFromDatabase(device: DatabaseEntry): void {
+        Device.devices[device.ieeeAddr].removeAllListeners();
+        delete Device.devices[device.ieeeAddr];
+        const deviceInstance = Device.fromDatabaseEntry(device);
+        Device.devices[deviceInstance.ieeeAddr] = deviceInstance;
     }
 
     /*

@@ -57,7 +57,7 @@ class Group extends Entity {
         return new Group(entry.id, entry.groupID, members, entry.meta);
     }
 
-    private toDatabaseRecord(): DatabaseEntry {
+    public toDatabaseEntry(): DatabaseEntry {
         const members = Array.from(this.members).map((member) => {
             return {deviceIeeeAddr: member.getDevice().ieeeAddr, endpointID: member.ID};
         });
@@ -96,7 +96,7 @@ class Group extends Entity {
 
         const databaseID = await Entity.database.newID();
         const group = new Group(databaseID, groupID, new Set(), {});
-        await Entity.database.insert(group.toDatabaseRecord());
+        await Entity.database.insert(group.toDatabaseEntry());
 
         Group.groups[group.groupID] = group;
         return group;
@@ -119,8 +119,8 @@ class Group extends Entity {
         delete Group.groups[this.groupID];
     }
 
-    public async save(writeDatabase=true): Promise<void> {
-        await Entity.database.update(this.toDatabaseRecord(), writeDatabase);
+    public async save(): Promise<void> {
+        await Entity.database.update(this.toDatabaseEntry());
     }
 
     public async addMember(endpoint: Endpoint): Promise<void> {

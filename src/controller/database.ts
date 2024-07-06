@@ -46,16 +46,24 @@ class Database implements IDatabase {
         await this.write();
     }
 
-    public async update(DatabaseEntry: DatabaseEntry, write: boolean): Promise<void> {
+    public async update(DatabaseEntry: DatabaseEntry): Promise<void> {
         if (!this.entries[DatabaseEntry.id]) {
             throw new Error(`DatabaseEntry with ID '${DatabaseEntry.id}' does not exist`);
         }
 
         this.entries[DatabaseEntry.id] = DatabaseEntry;
 
-        if (write) {
-            await this.write();
+        await this.write();
+    }
+
+    public async updateMany(databaseEntries: DatabaseEntry[]): Promise<void> {
+        for (const databaseEntry of databaseEntries) {
+            if (!this.entries[databaseEntry.id]) {
+                throw new Error(`DatabaseEntry with ID '${databaseEntry.id}' does not exist`);
+            }
+            this.entries[databaseEntry.id] = databaseEntry;
         }
+        await this.write();
     }
 
     public async remove(ID: number): Promise<void> {
@@ -76,7 +84,12 @@ class Database implements IDatabase {
         return this.maxId;
     }
 
-    public async write(): Promise<void> {
+    public async subscribeDeviceUpdates(): Promise<void> {
+        // The update is only required for distributed setups.
+        return;
+    }
+
+    private async write(): Promise<void> {
         logger.debug(`Writing database to '${this.path}'`, NS);
         const lines = [];
         for (const DatabaseEntry of Object.values(this.entries)) {

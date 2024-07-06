@@ -342,15 +342,10 @@ class Controller extends events.EventEmitter {
     }
 
     private async databaseSave(): Promise<void> {
-        for (const device of Device.all()) {
-            await device.save(false);
-        }
-
-        for (const group of Group.all()) {
-            await group.save(false);
-        }
-
-        await this.database.write();
+        await this.database.updateMany([
+            ...Device.all().map(x => x.toDatabaseEntry()),
+            ...Group.all().map(x => x.toDatabaseEntry()),
+        ]);
     }
 
     public async backup(): Promise<void> {

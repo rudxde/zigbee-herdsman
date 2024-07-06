@@ -39,13 +39,61 @@ interface GreenPowerDeviceJoinedPayload {
 
 
 interface IDatabase {
+    /**
+     * Get all entries of the given type
+     *
+     * @param {EntityType[]} type The type of entries to get
+     * @return {*}  {Promise<DatabaseEntry[]>}
+     */
     getEntries(type: EntityType[]): Promise<DatabaseEntry[]>;
-    insert(DatabaseEntry: DatabaseEntry): Promise<void>;
-    update(DatabaseEntry: DatabaseEntry, write: boolean): Promise<void>;
+    /**
+     * Insert a new entry into the database
+     *
+     * @param {DatabaseEntry} DatabaseEntry The entry to insert
+     * @return {Promise<void>}
+     */
+    insert(databaseEntry: DatabaseEntry): Promise<void>;
+    /**
+     * Update an existing entry in the database
+     * 
+     * @param DatabaseEntry The entry to update
+     * @param write Whether to write the changes to disk
+     */
+    update(databaseEntry: DatabaseEntry): Promise<void>;
+    /**
+     * Update multiple entries in the database
+     *
+     * @param {DatabaseEntry[]} databaseEntries
+     * @return {*}  {Promise<void>}
+     * @memberof IDatabase
+     */
+    updateMany(databaseEntries: DatabaseEntry[]): Promise<void>;
+    /**
+     * Remove an entry from the database
+     * @param id The ID of the entry to remove
+     */
     remove(id: number): Promise<void>;
+    /**
+     * Check if an entry with the given ID exists
+     *
+     * @param {number} id The ID to check
+     * @return {*}  {Promise<boolean>}
+     */
     has(id: number): Promise<boolean>;
+    /**
+     * Get a new unique ID
+     *
+     * @return {Promise<number>}
+     * @memberof IDatabase
+     */
     newID(): Promise<number>;
-    write(): Promise<void>;
+    /**
+     * 
+     *
+     * @param {(device: DatabaseEntry) => Promise<void>} callback
+     * @memberof IDatabase
+     */
+    subscribeDeviceUpdates(callback: (device: DatabaseEntry) => Promise<void>): void;
 }
 
 export {
